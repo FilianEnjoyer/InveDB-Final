@@ -1,0 +1,488 @@
+﻿@model IEnumerable<InveDB.Controles.MovimientoViewModel>
+
+@{
+    ViewData["Title"] = "Gestión de Movimientos";
+
+    var rol = Context.Session.GetString("Rol");
+
+    if (rol == "Admin")
+    {
+        Layout = "~/Views/Shared/_LayoutAdmin.cshtml";
+    }
+    else if (rol == "Capturista")
+    {
+        Layout = "~/Views/Shared/_LayoutCapturista.cshtml";
+    }
+    else if (rol == "Encargado")
+    {
+        Layout = "~/Views/Shared/_LayoutEncargado.cshtml";
+    }
+    else
+    {
+        Layout = "~/Views/Shared/_Layout.cshtml"; // por si existe el layout general
+    }
+}
+
+
+<!-- Mensajes de éxito o error -->
+@if (TempData["Mensaje"] != null)
+{
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
+        <div class="toast align-items-center text-bg-success border-0 show" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">@TempData["Mensaje"]</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    </div>
+}
+@if (TempData["Error"] != null)
+{
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
+        <div class="toast align-items-center text-bg-danger border-0 show" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">@TempData["Error"]</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    </div>
+}
+
+<h3 class="mb-4">Entradas y Salidas de Inventario</h3>
+
+<!-- FILTROS -->
+<div class="filter-section mb-4 row g-3 align-items-end">
+    <div class="col-md-2">
+        <label class="form-label fw-semibold">Producto</label>
+        <input type="text" class="form-control" id="filtroProducto" placeholder="Buscar producto..." onkeyup="filtrarMovimientos()" />
+        <select class="form-select mt-1" id="dropdownProducto" onchange="filtrarPorDropdown('producto')">
+            <option value="">-- Seleccionar producto --</option>
+            @foreach (var p in (List<(int Id, string Nombre)>)ViewBag.Productos)
+            {
+                <option value="@p.Nombre">@p.Nombre</option>
+            }
+        </select>
+    </div>
+
+    <div class="col-md-1">
+        <label class="form-label fw-semibold">Tipo</label>
+        <select class="form-select" id="filtroTipo" onchange="filtrarMovimientos()">
+            <option value="">Todos</option>
+            <option value="E">Entradas</option>
+            <option value="S">Salidas</option>
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <label class="form-label fw-semibold">Proveedor</label>
+        <select class="form-select" id="filtroProveedor" onchange="filtrarMovimientos()">
+            <option value="">Todos</option>
+            @foreach (var pr in (List<(int Id, string Nombre)>)ViewBag.Proveedores)
+            {
+                <option value="@pr.Nombre">@pr.Nombre</option>
+            }
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <label class="form-label fw-semibold">Sucursal</label>
+        <select class="form-select" id="filtroSucursal" onchange="filtrarMovimientos()">
+            <option value="">Todas</option>
+            @foreach (var s in (List<(int Id, string Nombre)>)ViewBag.Sucursales)
+            {
+                <option value="@s.Nombre">@s.Nombre</option>
+            }
+        </select>
+    </div>
+
+    <div class="col-md-3">
+        <label class="form-label fw-semibold">Rango de Fecha</label>
+
+        <div class="d-flex gap-2 mb-1">
+            <div class="input-group">
+                <input type="date" class="form-control" id="filtroFechaInicio" onchange="onFechaInicioChange()" />
+                <button type="button" class="btn btn-outline-secondary" title="Borrar fecha inicio" onclick="clearFechaInicio()">✕</button>
+            </div>
+
+            <div class="input-group">
+                <input type="date" class="form-control" id="filtroFechaFin" onchange="onFechaFinChange()" />
+                <button type="button" class="btn btn-outline-secondary" title="Borrar fecha fin" onclick="clearFechaFin()">✕</button>
+            </div>
+        </div>
+
+        <small class="text-muted d-block mb-1">Selecciona fecha inicio y fin (inclusive). Si seleccionas solo una, filtra desde/ hasta esa fecha.</small>
+
+        <select class="form-select" id="dropdownFecha" onchange="filtrarPorDropdown('fecha')">
+            <option value="">-- Seleccionar fecha --</option>
+            @foreach (var f in ViewBag.Fechas)
+            {
+                <option value="@Convert.ToDateTime(f).ToString("yyyy-MM-dd")">
+                    @Convert.ToDateTime(f).ToString("yyyy-MM-dd")
+                </option>
+            }
+        </select>
+    </div>
+
+
+    <div class="col-md-1 d-flex justify-content-center">
+        <button class="btn btn-outline-danger mt-2" onclick="limpiarFiltros()">Limpiar</button>
+    </div>
+</div>
+
+<!-- TABLA -->
+<div class="table-responsive">
+    <table class="table table-bordered table-striped" id="tablaMovimientos">
+        <thead class="table-dark">
+            <tr>
+                <th>Producto</th>
+                <th>Tipo</th>
+                <th>Cantidad</th>
+                <th>Proveedor</th>
+                <th>Sucursal</th>
+                <th>Fecha</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Any())
+            {
+                foreach (var m in Model)
+                {
+                    <tr>
+                        <td>@m.Producto</td>
+                        <td>@(m.Tipo == "E" ? "Entrada" : "Salida")</td>
+                        <td>@m.Cantidad</td>
+                        <td>@m.Proveedor</td>
+                        <td>@m.Sucursal</td>
+                        <td>@m.Fecha.ToString("yyyy-MM-dd")</td>
+                    </tr>
+                }
+            }
+            else
+            {
+                <tr>
+                    <td colspan="6" class="text-center text-muted">No hay movimientos registrados</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<!--  FORMULARIO REGISTRO -->
+<hr />
+<h5>Registrar nuevo movimiento</h5>
+
+<form method="post" asp-action="RegistrarMovimiento" asp-controller="Movimientos" class="row g-3" id="formMovimiento">
+    @Html.AntiForgeryToken()
+
+    <div class="col-md-3">
+        <label>Producto</label>
+        <select class="form-select" name="idProducto" id="idProducto" required onchange="validarFormulario()">
+            <option value="">-- Seleccionar --</option>
+            @foreach (var p in (List<(int Id, string Nombre)>)ViewBag.Productos)
+            {
+                <option value="@p.Id">@p.Nombre</option>
+            }
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <label>Tipo</label>
+        <select class="form-select" name="tipo" id="tipoMovimiento" required onchange="actualizarCampos(); validarFormulario();">
+            <option value="">-- Seleccionar --</option>
+            <option value="E">Entrada</option>
+            <option value="S">Salida</option>
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <label>Cantidad</label>
+        <input type="number" class="form-control" step="0.01" name="cantidad" id="cantidad" min="0.01" required oninput="validarFormulario()" />
+    </div>
+
+    <!-- Campo de proveedor (solo visible si es Entrada) -->
+    <div class="col-md-2" id="campoProveedor" style="display: none;">
+        <label>Proveedor</label>
+        <select class="form-select" name="idProveedor" id="idProveedor" onchange="validarFormulario()">
+            <option value="">-- Seleccionar proveedor --</option>
+            @foreach (var pr in (List<(int Id, string Nombre)>)ViewBag.Proveedores)
+            {
+                <option value="@pr.Id">@pr.Nombre</option>
+            }
+        </select>
+    </div>
+
+    <!-- Campo de sucursal (solo visible si es Salida) -->
+    <div class="col-md-2" id="campoSucursal" style="display: none;">
+        <label>Sucursal</label>
+        <select class="form-select" name="idSucursal" id="idSucursal" onchange="validarFormulario()">
+            <option value="">-- Seleccionar sucursal --</option>
+            @foreach (var s in (List<(int Id, string Nombre)>)ViewBag.Sucursales)
+            {
+                <option value="@s.Id">@s.Nombre</option>
+            }
+        </select>
+    </div>
+
+    <!-- Botón insertar (solo visible cuando todo está completo) -->
+    <div class="col-md-1 d-flex align-items-end" id="botonInsertarContainer" style="display: none;">
+        <button type="submit" class="btn btn-success w-100" id="btnInsertar">Insertar</button>
+    </div>
+</form>
+<!-- CSS -->
+<style>
+    label {
+        font-weight: 600;
+    }
+
+    #formMovimiento select,
+    #formMovimiento input {
+        transition: all 0.2s ease-in-out;
+    }
+
+        #formMovimiento select:invalid,
+        #formMovimiento input:invalid {
+            border-color: #dc3545;
+        }
+
+        #formMovimiento select:valid,
+        #formMovimiento input:valid {
+            border-color: #198754;
+        }
+
+    .filter-section label {
+        font-weight: 600;
+    }
+
+    .table th, .table td {
+        vertical-align: middle;
+    }
+</style>
+
+<!-- JS FILTROS -->
+<script>
+    function filtrarMovimientos() {
+        let prod = document.getElementById("filtroProducto").value.toLowerCase();
+        let tipo = document.getElementById("filtroTipo").value.toLowerCase();
+        let fechaInicio = document.getElementById("filtroFechaInicio").value; // yyyy-MM-dd or ""
+        let fechaFin = document.getElementById("filtroFechaFin").value;
+        let prov = document.getElementById("filtroProveedor").value.toLowerCase();
+        let suc = document.getElementById("filtroSucursal").value.toLowerCase();
+
+        let filas = document.querySelectorAll("#tablaMovimientos tbody tr");
+
+        filas.forEach(fila => {
+            let p = fila.cells[0].textContent.toLowerCase();
+            let t = fila.cells[1].textContent.toLowerCase();
+            let pr = fila.cells[3].textContent.toLowerCase();
+            let s = fila.cells[4].textContent.toLowerCase();
+            let f = fila.cells[5].textContent.trim(); // formato yyyy-MM-dd
+
+            // validar fecha con reglas de rango (inclusivo)
+            let fechaOK = true;
+            if (fechaInicio && fechaFin) {
+                fechaOK = (f >= fechaInicio && f <= fechaFin);
+            } else if (fechaInicio) {
+                fechaOK = (f >= fechaInicio);
+            } else if (fechaFin) {
+                fechaOK = (f <= fechaFin);
+            } else {
+                fechaOK = true;
+            }
+
+            if (
+                p.includes(prod) &&
+                (tipo === "" || t.includes(tipo)) &&
+                fechaOK &&
+                (prov === "" || pr.includes(prov)) &&
+                (suc === "" || s.includes(suc))
+            ) {
+                fila.style.display = "";
+            } else {
+                fila.style.display = "none";
+            }
+        });
+    }
+    function onFechaInicioChange() {
+        const inicioInput = document.getElementById("filtroFechaInicio");
+        const finInput = document.getElementById("filtroFechaFin");
+        const inicio = inicioInput.value;
+        const fin = finInput.value;
+
+        if (inicio) {
+            // establecer min del fin
+            finInput.min = inicio;
+
+            // si hay fin y es anterior a inicio, corregir fin para que sea igual a inicio
+            if (fin && fin < inicio) {
+                finInput.value = inicio;
+            }
+        } else {
+            // quitar restricción
+            finInput.removeAttribute('min');
+        }
+
+        // si inicio fue limpiado, no dejamos max en inicio
+        if (!inicio) {
+            inicioInput.removeAttribute('max');
+        }
+
+        filtrarMovimientos();
+    }
+    function onFechaFinChange() {
+        const inicioInput = document.getElementById("filtroFechaInicio");
+        const finInput = document.getElementById("filtroFechaFin");
+        const inicio = inicioInput.value;
+        const fin = finInput.value;
+
+        if (fin) {
+            // establecer max del inicio
+            inicioInput.max = fin;
+
+            // si hay inicio y es posterior al fin, corregir inicio para que sea igual a fin
+            if (inicio && inicio > fin) {
+                inicioInput.value = fin;
+            }
+        } else {
+            // quitar restricción
+            inicioInput.removeAttribute('max');
+        }
+
+        // si fin fue limpiado, no dejamos min en fin
+        if (!fin) {
+            finInput.removeAttribute('min');
+        }
+
+        filtrarMovimientos();
+    }
+    function clearFechaInicio() {
+        const inicioInput = document.getElementById("filtroFechaInicio");
+        inicioInput.value = "";
+        // quitar max que pudo tener
+        inicioInput.removeAttribute('max');
+
+        // si existe fin, no forzarlo; quitar min en fin si ya no aplica
+        const finInput = document.getElementById("filtroFechaFin");
+        if (!finInput.value) finInput.removeAttribute('min');
+
+        filtrarMovimientos();
+    }
+
+    function clearFechaFin() {
+        const finInput = document.getElementById("filtroFechaFin");
+        finInput.value = "";
+        finInput.removeAttribute('min');
+
+        const inicioInput = document.getElementById("filtroFechaInicio");
+        if (!inicioInput.value) inicioInput.removeAttribute('max');
+
+        filtrarMovimientos();
+    }
+
+    function filtrarPorDropdown(tipo) {
+        let valor = "";
+        switch (tipo) {
+            case "producto":
+                valor = document.getElementById("dropdownProducto").value;
+                document.getElementById("filtroProducto").value = valor;
+                break;
+            case "fecha":
+                valor = document.getElementById("dropdownFecha").value; // yyyy-MM-dd
+                document.getElementById("filtroFechaInicio").value = valor;
+                document.getElementById("filtroFechaFin").value = valor;
+
+                // ajustar min/max
+                document.getElementById("filtroFechaFin").min = valor;
+                document.getElementById("filtroFechaInicio").max = valor;
+                break;
+        }
+        filtrarMovimientos();
+    }
+
+    function limpiarFiltros() {
+        document.getElementById("filtroProducto").value = "";
+        document.getElementById("filtroTipo").value = "";
+        document.getElementById("filtroFechaInicio").value = "";
+        document.getElementById("filtroFechaFin").value = "";
+        document.getElementById("dropdownProducto").value = "";
+        document.getElementById("dropdownFecha").value = "";
+        document.getElementById("filtroProveedor").value = "";
+        document.getElementById("filtroSucursal").value = "";
+
+        // quitar restricciones min/max
+        const inicio = document.getElementById("filtroFechaInicio");
+        const fin = document.getElementById("filtroFechaFin");
+        if (inicio) { inicio.removeAttribute('max'); }
+        if (fin) { fin.removeAttribute('min'); }
+
+        filtrarMovimientos();
+    }
+
+      function actualizarCampos() {
+        const tipo = document.getElementById("tipoMovimiento").value;
+        const campoProveedor = document.getElementById("campoProveedor");
+        const campoSucursal = document.getElementById("campoSucursal");
+        const proveedor = document.getElementById("idProveedor");
+        const sucursal = document.getElementById("idSucursal");
+
+        // Reiniciar valores
+        proveedor.value = "";
+        sucursal.value = "";
+
+        if (tipo === "E") {
+            campoProveedor.style.display = "block";
+            campoSucursal.style.display = "none";
+            proveedor.setAttribute("required", "true");
+            sucursal.removeAttribute("required");
+        } else if (tipo === "S") {
+            campoProveedor.style.display = "none";
+            campoSucursal.style.display = "block";
+            sucursal.setAttribute("required", "true");
+            proveedor.removeAttribute("required");
+        } else {
+            campoProveedor.style.display = "none";
+            campoSucursal.style.display = "none";
+            proveedor.removeAttribute("required");
+            sucursal.removeAttribute("required");
+        }
+
+        validarFormulario();
+    }
+
+    function validarFormulario() {
+        const producto = document.getElementById("idProducto").value;
+        const tipo = document.getElementById("tipoMovimiento").value;
+        const cantidad = parseFloat(document.getElementById("cantidad").value);
+        const proveedor = document.getElementById("idProveedor").value;
+        const sucursal = document.getElementById("idSucursal").value;
+        const botonContainer = document.getElementById("botonInsertarContainer");
+
+        let valido = false;
+
+        if (tipo === "E") {
+            // Solo es válido si se seleccionó un proveedor real
+            valido = producto && tipo && cantidad > 0 && proveedor !== "";
+        } else if (tipo === "S") {
+            // Solo es válido si se seleccionó una sucursal real
+            valido = producto && tipo && cantidad > 0 && sucursal !== "";
+        }
+
+        botonContainer.style.display = valido ? "flex" : "none";
+    }
+
+    // Validación extra antes de enviar
+     document.getElementById("formMovimiento").addEventListener("submit", function (e) {
+        const tipo = document.getElementById("tipoMovimiento").value;
+        const proveedor = document.getElementById("idProveedor").value;
+        const sucursal = document.getElementById("idSucursal").value;
+
+        if ((tipo === "E" && proveedor === "") || (tipo === "S" && sucursal === "")) {
+            e.preventDefault();
+            alert("Por favor, selecciona un proveedor o sucursal válido antes de insertar.");
+        }
+    });
+
+    // Llamada inicial para aplicar cualquier filtro por defecto al cargar
+    document.addEventListener('DOMContentLoaded', function () {
+        filtrarMovimientos();
+    });
+</script>
